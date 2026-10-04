@@ -1,24 +1,45 @@
+import os
 import gspread
+import streamlit as st
 from google.oauth2.service_account import Credentials
 
 
-# File credential Service Account
 CREDENTIALS_FILE = "moonlit-casing-510516-n8-3fc64142db30.json"
 
-# ID Google Spreadsheet
 SPREADSHEET_ID = "1E9o8a2v5vH7ij1s4vHfok3PADgo0Ep29YVSqRfdWOOc"
 
-# Hak akses yang dibutuhkan
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly"
 ]
 
 
 def connect_google_sheet():
-    credentials = Credentials.from_service_account_file(
-        CREDENTIALS_FILE,
-        scopes=SCOPES
-    )
+
+    # =========================================================
+    # LOCAL
+    # =========================================================
+
+    if os.path.exists(CREDENTIALS_FILE):
+
+        credentials = Credentials.from_service_account_file(
+            CREDENTIALS_FILE,
+            scopes=SCOPES
+        )
+
+    # =========================================================
+    # STREAMLIT CLOUD
+    # =========================================================
+
+    else:
+
+        credentials_info = dict(
+            st.secrets["gcp_service_account"]
+        )
+
+        credentials = Credentials.from_service_account_info(
+            credentials_info,
+            scopes=SCOPES
+        )
 
     client = gspread.authorize(credentials)
 
