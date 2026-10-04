@@ -1,0 +1,25 @@
+# Virtual environment
+venv/
+.venv/
+
+# Google credentials
+*.json
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Environment files
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
