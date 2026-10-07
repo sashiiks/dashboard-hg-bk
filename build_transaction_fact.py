@@ -22,8 +22,7 @@ def normalize_text(series: pd.Series) -> pd.Series:
 
 
 def prepare_target_agent(target: pd.DataFrame) -> pd.DataFrame:
-    """Prepare master agent dari TARGET AGENT."""
-
+    """Prepare master agent."""
     target = target.copy()
 
     text_columns = [
@@ -37,7 +36,7 @@ def prepare_target_agent(target: pd.DataFrame) -> pd.DataFrame:
     for column in text_columns:
         target[column] = normalize_text(target[column])
 
-    # Case-insensitive matching key.
+    # Case-insensitive matching key
     target["agent_key"] = (
         target["Nama Agent"]
         .str.casefold()
@@ -51,19 +50,18 @@ def prepare_sales(
     brand: str,
 ) -> pd.DataFrame:
     """
-    Prepare raw sales data tanpa menghilangkan kolom.
+    Prepare raw sales data.
+
+    Row tanpa invoice_no dianggap sebagai blank/template row
+    dan tidak diproses sebagai transaction.
     """
 
     df = df.copy()
 
-    # ---------------------------------------------------------
-    # 1. BRAND
-    # ---------------------------------------------------------
-
     df["brand"] = brand
 
     # ---------------------------------------------------------
-    # 2. NORMALISASI TEXT
+    # NORMALISASI KOLOM TEXT UTAMA
     # ---------------------------------------------------------
 
     for column in [
@@ -76,7 +74,17 @@ def prepare_sales(
         df[column] = normalize_text(df[column])
 
     # ---------------------------------------------------------
-    # 3. PARSE DATE
+    # FILTER BLANK TRANSACTION
+    # ---------------------------------------------------------
+    # Row yang tidak memiliki invoice_no bukan transaksi valid.
+    # Biasanya berasal dari blank row/template di Google Sheet.
+
+    df = df[
+        df["invoice_no"].ne("")
+    ].copy()
+
+    # ---------------------------------------------------------
+    # PARSE TANGGAL
     # ---------------------------------------------------------
 
     df["tanggal"] = pd.to_datetime(
@@ -100,17 +108,16 @@ def build_transaction_fact(
     Build 1 transaction fact per brand + invoice_no.
 
     Business rule:
-    - 1 transaction = 1 brand + 1 invoice_no.
-    - Status terakhir/current digunakan sebagai status_final.
-    - Raw fields tetap dipertahankan.
-    - Agent dimapping berdasarkan TARGET AGENT.
+    - 1 transaction = 1 brand + 1 invoice_no
+    - Status terakhir/current digunakan sebagai status_final
+    - Raw fields tetap dipertahankan
     """
 
     df = df.copy()
 
-    # =========================================================
-    # 1. TRANSACTION KEY
-    # =========================================================
+    # ---------------------------------------------------------
+    # 1. BUAT TRANSACTION KEY
+    # ---------------------------------------------------------
 
     df["transaction_key"] = (
         df["brand"].astype(str).str.strip()
@@ -118,15 +125,17 @@ def build_transaction_fact(
         + df["invoice_no"].astype(str).str.strip()
     )
 
-    # =========================================================
-    # 2. ORIGINAL ROW ORDER
-    # =========================================================
+    # ---------------------------------------------------------
+    # 2. SIMPAN URUTAN ASLI DATA
+    # ---------------------------------------------------------
+    # Digunakan sebagai tie-breaker kalau informasi waktunya
+    # sama.
 
     df["_row_order"] = range(len(df))
 
-    # =========================================================
-    # 3. SORT TRANSACTION LIFECYCLE
-    # =========================================================
+    # ---------------------------------------------------------
+    # 3. URUTKAN BERDASARKAN TRANSACTION + INFORMASI WAKTU
+    # ---------------------------------------------------------
 
     df = df.sort_values(
         by=[
@@ -138,37 +147,69 @@ def build_transaction_fact(
         na_position="first",
     )
 
-    # =========================================================
-    # 4. LATEST ROW = CURRENT TRANSACTION STATE
-    # =========================================================
+    # ---------------------------------------------------------
+    # 4. AMBIL ROW TERAKHIR UNTUK SETIAP TRANSACTION
+    # ---------------------------------------------------------
 
     fact = (
-        df.groupby(
-            "transaction_key",
-            as_index=False,
-        )
+        df.groupby("transaction_key", as_index=False)
         .last()
     )
 
-    fact["status_final"] = fact["status"]
+    # ---------------------------------------------------------
+    # 5. STATUS FINAL / CURRENT STATUS
+    # ---------------------------------------------------------
 
-    # =========================================================
-    # 5. AGENT MAPPING
-    # =========================================================
-
-    target_mapping = (
-        target[
-            [
-                "agent_key",
-                "Nama Agent",
-                "Company",
-                "Role",
-                "Nama Team Leader",
-                "Tier",
-            ]
-        ]
-        .drop_duplicates("agent_key")
+    fact["status_final"] = (
+        fact["status"]
+        .astype(str)
+        .str.strip()
+        .str.casefold()
     )
+
+    # ---------------------------------------------------------
+    # 6. INVOICE REVENUE
+    # ---------------------------------------------------------
+    #
+    # Business rule:
+    #
+    # payment_total
+    #       ↓ jika kosong
+    # amount
+    #       ↓ jika tetap kosong
+    # 0
+    #
+    # Ini menjadi sumber revenue yang digunakan oleh
+    # Performance Fact.
+
+    fact["invoice_revenue"] = pd.to_numeric(
+        fact["payment_total"],
+        errors="coerce",
+    )
+
+    fact["invoice_revenue"] = fact[
+        "invoice_revenue"
+    ].fillna(
+        pd.to_numeric(
+            fact["amount"],
+            errors="coerce",
+        )
+    ).fillna(0)
+
+    # ---------------------------------------------------------
+    # 7. MAPPING AGENT → TARGET AGENT
+    # ---------------------------------------------------------
+
+    target_mapping = target[
+        [
+            "agent_key",
+            "Nama Agent",
+            "Company",
+            "Role",
+            "Nama Team Leader",
+            "Tier",
+        ]
+    ].drop_duplicates("agent_key")
 
     fact["agent_key"] = (
         fact["sales"]
@@ -185,9 +226,9 @@ def build_transaction_fact(
         suffixes=("", "_target"),
     )
 
-    # =========================================================
-    # 6. MAPPING STATUS
-    # =========================================================
+    # ---------------------------------------------------------
+    # 8. MAPPING STATUS
+    # ---------------------------------------------------------
 
     fact["mapping_status"] = fact["Nama Agent"].apply(
         lambda x: (
@@ -197,34 +238,22 @@ def build_transaction_fact(
         )
     )
 
-    # =========================================================
-    # 7. PERFORMANCE DATE
-    # =========================================================
+    # ---------------------------------------------------------
+    # 9. PERFORMANCE DATE
+    # ---------------------------------------------------------
 
     fact["performance_date"] = pd.NaT
 
     success_mask = (
         fact["status_final"]
-        .fillna("")
-        .astype(str)
-        .str.casefold()
         .eq("success")
     )
 
     unpaid_mask = (
         fact["status_final"]
-        .fillna("")
-        .astype(str)
-        .str.casefold()
-        .isin(
-            [
-                "pending",
-                "challenge",
-            ]
-        )
+        .isin(["pending", "challenge"])
     )
 
-    # Paid → payment_date.
     fact.loc[
         success_mask,
         "performance_date",
@@ -233,7 +262,6 @@ def build_transaction_fact(
         "payment_date",
     ]
 
-    # Unpaid → tanggal invoice.
     fact.loc[
         unpaid_mask,
         "performance_date",
@@ -242,31 +270,12 @@ def build_transaction_fact(
         "tanggal",
     ]
 
-    # Cancel → tidak masuk performance.
-    fact.loc[
-        fact["status_final"]
-        .fillna("")
-        .astype(str)
-        .str.casefold()
-        .eq("cancel"),
-        "performance_date",
-    ] = pd.NaT
-
-    # Normalize ke tanggal saja.
-    fact["performance_date"] = pd.to_datetime(
-        fact["performance_date"],
-        errors="coerce",
-    ).dt.normalize()
-
-    # =========================================================
-    # 8. DASHBOARD STATUS
-    # =========================================================
+    # ---------------------------------------------------------
+    # 10. STATUS DASHBOARD
+    # ---------------------------------------------------------
 
     fact["dashboard_status"] = (
         fact["status_final"]
-        .fillna("")
-        .astype(str)
-        .str.casefold()
         .map(
             {
                 "success": "paid",
@@ -277,61 +286,9 @@ def build_transaction_fact(
         )
     )
 
-    # =========================================================
-    # 9. AGENT DISPLAY
-    # =========================================================
-
-    def clean_value(value):
-        if pd.isna(value):
-            return ""
-
-        return str(value).strip()
-
-    fact["agent_display"] = (
-        fact["Nama Agent"].apply(clean_value)
-        + " · Tier "
-        + fact["Tier"].apply(clean_value)
-        + " · "
-        + fact["Role"].apply(clean_value)
-        + " · TL: "
-        + fact["Nama Team Leader"].apply(clean_value)
-    )
-
-    # Untuk agent yang belum termapping,
-    # jangan menghasilkan string informasi kosong yang panjang.
-    fact.loc[
-        fact["mapping_status"] == "unmapped",
-        "agent_display",
-    ] = fact.loc[
-        fact["mapping_status"] == "unmapped",
-        "sales",
-    ].apply(clean_value)
-
-    # =========================================================
-    # 10. NUMERIC REVENUE FIELDS
-    # =========================================================
-
-    fact["payment_total"] = pd.to_numeric(
-        fact["payment_total"],
-        errors="coerce",
-    )
-
-    fact["amount"] = pd.to_numeric(
-        fact["amount"],
-        errors="coerce",
-    )
-
-    # Revenue dasar:
-    # payment_total → fallback amount.
-    fact["invoice_revenue"] = (
-        fact["payment_total"]
-        .fillna(fact["amount"])
-        .fillna(0)
-    )
-
-    # =========================================================
-    # 11. CLEAN HELPER
-    # =========================================================
+    # ---------------------------------------------------------
+    # 11. BERSIHKAN HELPER
+    # ---------------------------------------------------------
 
     fact = fact.drop(
         columns=["_row_order"],
@@ -342,12 +299,7 @@ def build_transaction_fact(
 
 
 def main():
-
     print("Loading Google Sheets...")
-
-    # =========================================================
-    # LOAD RAW
-    # =========================================================
 
     target = load_sheet("TARGET AGENT")
     hg = load_sheet("SALES HG OCT")
@@ -366,7 +318,7 @@ def main():
     )
 
     # =========================================================
-    # DATE AUDIT
+    # DATE AUDIT — SEBELUM FILTER 1 OKTOBER
     # =========================================================
 
     print("\n===== DATE AUDIT =====")
@@ -375,7 +327,6 @@ def main():
         ("HG", hg),
         ("BK", bk),
     ]:
-
         temp = data.copy()
 
         temp["tanggal_check"] = pd.to_datetime(
@@ -428,8 +379,6 @@ def main():
     # BUILD TRANSACTION FACT
     # =========================================================
 
-    print("\n===== BUILD TRANSACTION FACT =====")
-
     hg_fact = build_transaction_fact(
         hg,
         target,
@@ -459,10 +408,6 @@ def main():
         f"{len(fact):,}"
     )
 
-    # =========================================================
-    # BRAND
-    # =========================================================
-
     print("\n===== BRAND =====")
 
     print(
@@ -470,10 +415,6 @@ def main():
         .value_counts()
         .to_string()
     )
-
-    # =========================================================
-    # FINAL STATUS
-    # =========================================================
 
     print("\n===== FINAL STATUS =====")
 
@@ -483,22 +424,6 @@ def main():
         .to_string()
     )
 
-    # =========================================================
-    # DASHBOARD STATUS
-    # =========================================================
-
-    print("\n===== DASHBOARD STATUS =====")
-
-    print(
-        fact["dashboard_status"]
-        .value_counts(dropna=False)
-        .to_string()
-    )
-
-    # =========================================================
-    # MAPPING
-    # =========================================================
-
     print("\n===== MAPPING =====")
 
     print(
@@ -506,10 +431,6 @@ def main():
         .value_counts(dropna=False)
         .to_string()
     )
-
-    # =========================================================
-    # UNMAPPED SALES
-    # =========================================================
 
     print("\n===== UNMAPPED SALES =====")
 
@@ -525,11 +446,7 @@ def main():
         unmapped.to_string()
     )
 
-    # =========================================================
-    # TEAM LEADER
-    # =========================================================
-
-    print("\n===== TEAM LEADER =====")
+    print("\n===== TL =====")
 
     print(
         fact["Nama Team Leader"]
@@ -538,81 +455,29 @@ def main():
     )
 
     # =========================================================
-    # AGENT DISPLAY
+    # REVENUE AUDIT
     # =========================================================
 
-    print("\n===== AGENT DISPLAY SAMPLE =====")
+    print("\n===== INVOICE REVENUE AUDIT =====")
 
     print(
-        fact[
-            [
-                "Nama Agent",
-                "Tier",
-                "Role",
-                "Nama Team Leader",
-                "agent_display",
-            ]
-        ]
-        .drop_duplicates()
-        .head(20)
-        .to_string(index=False)
-    )
-
-    # =========================================================
-    # REVENUE
-    # =========================================================
-
-    print("\n===== INVOICE REVENUE =====")
-
-    paid = fact[
-        fact["dashboard_status"] == "paid"
-    ]
-
-    unpaid = fact[
-        fact["dashboard_status"] == "unpaid"
-    ]
-
-    excluded = fact[
-        fact["dashboard_status"] == "cancel"
-    ]
-
-    print(
-        f"Paid Invoice Revenue   : Rp "
-        f"{paid['invoice_revenue'].sum():,.0f}"
+        f"Invoice Revenue : "
+        f"Rp{fact['invoice_revenue'].sum():,.0f}"
     )
 
     print(
-        f"Unpaid Invoice Revenue : Rp "
-        f"{unpaid['invoice_revenue'].sum():,.0f}"
+        f"Paid Revenue    : "
+        f"Rp{fact.loc[fact['status_final'].eq('success'), 'invoice_revenue'].sum():,.0f}"
     )
 
     print(
-        f"Excluded Revenue       : Rp "
-        f"{excluded['invoice_revenue'].sum():,.0f}"
-    )
-
-    # =========================================================
-    # PERFORMANCE DATE
-    # =========================================================
-
-    print("\n===== PERFORMANCE DATE =====")
-
-    date_audit = (
-        fact.loc[
-            fact["dashboard_status"].isin(
-                [
-                    "paid",
-                    "unpaid",
-                ]
-            ),
-            "performance_date",
-        ]
-        .value_counts()
-        .sort_index()
+        f"Unpaid Revenue  : "
+        f"Rp{fact.loc[fact['status_final'].isin(['pending', 'challenge']), 'invoice_revenue'].sum():,.0f}"
     )
 
     print(
-        date_audit.to_string()
+        f"Cancel Revenue  : "
+        f"Rp{fact.loc[fact['status_final'].eq('cancel'), 'invoice_revenue'].sum():,.0f}"
     )
 
     # =========================================================
@@ -665,7 +530,7 @@ def main():
         )
 
     # =========================================================
-    # STATUS LIFECYCLE AUDIT
+    # STATUS LIFECYCLE + BUSINESS RULE AUDIT
     # =========================================================
 
     print("\n===== STATUS LIFECYCLE AUDIT =====")
@@ -694,55 +559,41 @@ def main():
     )
 
     # =========================================================
-    # SUCCESS / UNPAID / CANCEL AUDIT
+    # SUCCESS / UNPAID AUDIT
     # =========================================================
 
     print("\n===== SUCCESS / UNPAID AUDIT =====")
 
     success_count = (
-        fact["status_final"]
-        .fillna("")
-        .astype(str)
-        .str.casefold()
-        .eq("success")
-        .sum()
-    )
+        fact["status_final"] == "success"
+    ).sum()
 
     unpaid_count = (
         fact["status_final"]
-        .fillna("")
-        .astype(str)
-        .str.casefold()
         .isin(
             [
                 "pending",
                 "challenge",
             ]
         )
-        .sum()
-    )
+    ).sum()
 
     cancel_count = (
-        fact["status_final"]
-        .fillna("")
-        .astype(str)
-        .str.casefold()
-        .eq("cancel")
-        .sum()
-    )
+        fact["status_final"] == "cancel"
+    ).sum()
 
     print(
-        f"PAID / SUCCESS      : "
+        f"PAID / SUCCESS       : "
         f"{success_count:,}"
     )
 
     print(
-        f"UNPAID              : "
+        f"UNPAID               : "
         f"{unpaid_count:,}"
     )
 
     print(
-        f"CANCEL / EXCLUDED   : "
+        f"CANCEL / EXCLUDED    : "
         f"{cancel_count:,}"
     )
 
@@ -760,11 +611,9 @@ def main():
     ]
 
     unexpected = fact[
-        ~fact["status_final"]
-        .fillna("")
-        .astype(str)
-        .str.casefold()
-        .isin(allowed_status)
+        ~fact["status_final"].isin(
+            allowed_status
+        )
     ]
 
     print(
@@ -773,7 +622,6 @@ def main():
     )
 
     if len(unexpected) > 0:
-
         print(
             unexpected[
                 [

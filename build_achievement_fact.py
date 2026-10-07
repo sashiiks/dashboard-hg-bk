@@ -28,9 +28,11 @@ BRAND_TO_COMPANY = {
 
 def build_performance():
     target = load_sheet("TARGET AGENT")
+
     hg = load_sheet("SALES HG OCT")
     bk = load_sheet("SALES BK OCT")
 
+    # Prepare TARGET AGENT
     target = prepare_target_agent(target)
 
     # Hanya HG & BK
@@ -39,9 +41,18 @@ def build_performance():
         & target["Nama Agent"].ne("")
     ].copy()
 
-    hg = prepare_sales(hg, "Healthy Go")
-    bk = prepare_sales(bk, "Bekelin")
+    # Prepare sales
+    hg = prepare_sales(
+        hg,
+        "Healthy Go",
+    )
 
+    bk = prepare_sales(
+        bk,
+        "Bekelin",
+    )
+
+    # Build transaction fact per brand
     hg_fact = build_transaction_fact(
         hg,
         target,
@@ -53,10 +64,14 @@ def build_performance():
     )
 
     transaction_fact = pd.concat(
-        [hg_fact, bk_fact],
+        [
+            hg_fact,
+            bk_fact,
+        ],
         ignore_index=True,
     )
 
+    # Build performance fact
     performance_fact = build_performance_fact(
         transaction_fact
     )
@@ -73,6 +88,7 @@ def build_targets():
 
     target = prepare_target_agent(target)
 
+    # Hanya HG & BK
     target = target[
         target["Company"].isin(["HG", "BK"])
         & target["Nama Agent"].ne("")
@@ -161,6 +177,23 @@ def build_achievement_fact():
     )
 
     # =====================================================
+    # ONLY DASHBOARD TRANSACTION
+    # =====================================================
+    #
+    # Dashboard scope:
+    # - Paid    -> is_dashboard = True
+    # - Unpaid  -> is_dashboard = True
+    # - Cancel  -> excluded
+    #
+    # Karena agent sudah di-inner join dengan TARGET AGENT,
+    # transaksi unmapped otomatis tidak masuk achievement.
+    # =====================================================
+
+    performance = performance[
+        performance["is_dashboard"]
+    ].copy()
+
+    # =====================================================
     # ACTUAL
     # =====================================================
 
@@ -172,11 +205,33 @@ def build_achievement_fact():
         .fillna(0)
     )
 
-    performance["actual"] = performance[
-        "actual"
-    ].where(
-        performance["is_dashboard"],
-        0,
+    # =====================================================
+    # INVOICE QUANTITY
+    # =====================================================
+
+    performance["qty_invoice"] = (
+        performance["invoice_no"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .ne("")
+        .astype(int)
+    )
+
+    performance["qty_invoice_paid"] = (
+        performance["qty_invoice"]
+        .where(
+            performance["is_paid"],
+            0,
+        )
+    )
+
+    performance["qty_invoice_unpaid"] = (
+        performance["qty_invoice"]
+        .where(
+            performance["is_unpaid"],
+            0,
+        )
     )
 
     # =====================================================
@@ -202,11 +257,19 @@ def build_achievement_fact():
             actual=(
                 "actual",
                 "sum",
-            )
+            ),
+            qty_invoice_paid=(
+                "qty_invoice_paid",
+                "sum",
+            ),
+            qty_invoice_unpaid=(
+                "qty_invoice_unpaid",
+                "sum",
+            ),
         )
         .rename(
             columns={
-                "performance_date": "achievement_date"
+                "performance_date": "achievement_date",
             }
         )
     )
@@ -251,12 +314,31 @@ def build_achievement_fact():
         how="left",
     )
 
+    # =====================================================
+    # DEFAULT VALUE
+    # =====================================================
+
     # Tidak ada transaksi = actual 0
     achievement["actual"] = (
         achievement["actual"]
         .fillna(0)
     )
 
+    # Tidak ada Paid invoice = 0
+    achievement["qty_invoice_paid"] = (
+        achievement["qty_invoice_paid"]
+        .fillna(0)
+        .astype(int)
+    )
+
+    # Tidak ada Unpaid invoice = 0
+    achievement["qty_invoice_unpaid"] = (
+        achievement["qty_invoice_unpaid"]
+        .fillna(0)
+        .astype(int)
+    )
+
+    # Target numeric
     achievement["target"] = (
         pd.to_numeric(
             achievement["target"],
@@ -315,6 +397,8 @@ def build_achievement_fact():
             "tier",
             "target",
             "actual",
+            "qty_invoice_paid",
+            "qty_invoice_unpaid",
             "achievement_pct",
             "achievement_status",
         ]
@@ -362,6 +446,10 @@ if __name__ == "__main__":
         f"{achievement['achievement_date'].max()}"
     )
 
+    # =====================================================
+    # ACHIEVEMENT STATUS
+    # =====================================================
+
     print("\n===== ACHIEVEMENT STATUS =====")
 
     print(
@@ -371,6 +459,10 @@ if __name__ == "__main__":
         .value_counts()
         .to_string()
     )
+
+    # =====================================================
+    # BY COMPANY
+    # =====================================================
 
     print("\n===== BY COMPANY =====")
 
@@ -394,9 +486,52 @@ if __name__ == "__main__":
                 "actual",
                 "sum",
             ),
+            qty_invoice_paid=(
+                "qty_invoice_paid",
+                "sum",
+            ),
+            qty_invoice_unpaid=(
+                "qty_invoice_unpaid",
+                "sum",
+            ),
         )
         .to_string()
     )
+
+    # =====================================================
+    # INVOICE QUANTITY VALIDATION
+    # =====================================================
+
+    print("\n===== INVOICE QUANTITY VALIDATION =====")
+
+    total_paid = (
+        achievement["qty_invoice_paid"]
+        .sum()
+    )
+
+    total_unpaid = (
+        achievement["qty_invoice_unpaid"]
+        .sum()
+    )
+
+    print(
+        f"Paid Invoice Qty   : "
+        f"{total_paid:,}"
+    )
+
+    print(
+        f"Unpaid Invoice Qty : "
+        f"{total_unpaid:,}"
+    )
+
+    print(
+        f"Dashboard Invoice  : "
+        f"{total_paid + total_unpaid:,}"
+    )
+
+    # =====================================================
+    # SAMPLE
+    # =====================================================
 
     print("\n===== SAMPLE =====")
 

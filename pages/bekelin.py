@@ -1528,8 +1528,6 @@ def render_agent_ranking_table(df):
     numeric_columns = [
         "Qty Invoice Paid",
         "Qty Invoice Unpaid",
-        "paid_invoice_revenue",
-        "unpaid_invoice_revenue",
         "achievement_pct",
         "projection_pct",
     ]
@@ -1540,26 +1538,6 @@ def render_agent_ranking_table(df):
                 display[col],
                 errors="coerce",
             ).fillna(0)
-
-    # --------------------------------------------------------
-    # RENAME REVENUE
-    # --------------------------------------------------------
-
-    if "paid_invoice_revenue" in display.columns:
-        display["Paid Invoice Revenue"] = display[
-            "paid_invoice_revenue"
-        ]
-
-    else:
-        display["Paid Invoice Revenue"] = 0
-
-    if "unpaid_invoice_revenue" in display.columns:
-        display["Unpaid Invoice Revenue"] = display[
-            "unpaid_invoice_revenue"
-        ]
-
-    else:
-        display["Unpaid Invoice Revenue"] = 0
 
     # --------------------------------------------------------
     # ACHIEVEMENT / PROJECTION
@@ -1606,8 +1584,6 @@ def render_agent_ranking_table(df):
         "Target",
         "Qty Invoice Paid",
         "Qty Invoice Unpaid",
-        "Paid Invoice Revenue",
-        "Unpaid Invoice Revenue",
         "Achievement",
         "Projection",
         "Achievement CVR",
@@ -1640,14 +1616,6 @@ def render_agent_ranking_table(df):
         .fillna(0)
         .astype(int)
     )
-
-    display["Paid Invoice Revenue"] = display[
-        "Paid Invoice Revenue"
-    ].map(rupiah)
-
-    display["Unpaid Invoice Revenue"] = display[
-        "Unpaid Invoice Revenue"
-    ].map(rupiah)
 
     # --------------------------------------------------------
     # SAVE NUMERIC ACHIEVEMENT
@@ -2494,26 +2462,50 @@ filtered_for_update = filter_performance(
 updated_at = None
 
 
-if (
-    not filtered_for_update.empty
-    and "source_updated_at_display"
-    in filtered_for_update.columns
-):
-    values = (
-        filtered_for_update[
-            "source_updated_at_display"
+if not filtered_for_update.empty:
+
+    # --------------------------------------------------------
+    # PRIORITASKAN SOURCE_UPDATED_AT TERBARU
+    # --------------------------------------------------------
+
+    if "source_updated_at" in filtered_for_update.columns:
+
+        source_values = pd.to_datetime(
+            filtered_for_update[
+                "source_updated_at"
+            ],
+            errors="coerce",
+        ).dropna()
+
+        if not source_values.empty:
+            updated_at = source_values.max().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+
+    # --------------------------------------------------------
+    # FALLBACK KE DISPLAY TIMESTAMP
+    # --------------------------------------------------------
+
+    if (
+        updated_at is None
+        and "source_updated_at_display"
+        in filtered_for_update.columns
+    ):
+        values = (
+            filtered_for_update[
+                "source_updated_at_display"
+            ]
+            .dropna()
+            .astype(str)
+            .str.strip()
+        )
+
+        values = values[
+            values.ne("")
         ]
-        .dropna()
-        .astype(str)
-        .str.strip()
-    )
 
-    values = values[
-        values.ne("")
-    ]
-
-    if not values.empty:
-        updated_at = values.iloc[-1]
+        if not values.empty:
+            updated_at = values.iloc[-1]
 
 
 # ============================================================

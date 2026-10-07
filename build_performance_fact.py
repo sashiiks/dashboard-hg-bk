@@ -25,7 +25,6 @@ def build_performance_fact(fact: pd.DataFrame) -> pd.DataFrame:
     - Unpaid -> unpaid_invoice_revenue
     - Cancel -> 0
 
-    Catatan:
     invoice_revenue berasal dari Transaction Fact:
     payment_total -> fallback amount.
     """
@@ -98,9 +97,7 @@ def build_performance_fact(fact: pd.DataFrame) -> pd.DataFrame:
 
     if len(unexpected) > 0:
         print("\n===== UNEXPECTED STATUS =====")
-        print(
-            unexpected.to_string(index=False)
-        )
+        print(unexpected.to_string(index=False))
 
         raise ValueError(
             f"Ditemukan {len(unexpected)} transaction "
@@ -202,14 +199,6 @@ def build_performance_fact(fact: pd.DataFrame) -> pd.DataFrame:
     # 9. PERFORMANCE AMOUNT
     # ============================================================
 
-    # Business rule:
-    #
-    # payment_total
-    #       ↓ jika kosong
-    # amount
-    #
-    # Dipertahankan agar KPI lama tidak berubah.
-
     fact["performance_amount"] = (
         fact["payment_total"]
         .fillna(fact["amount"])
@@ -231,6 +220,13 @@ def build_performance_fact(fact: pd.DataFrame) -> pd.DataFrame:
         fact["invoice_revenue"],
         errors="coerce",
     ).fillna(0)
+
+    # Cancel tidak mempunyai revenue dashboard.
+
+    fact.loc[
+        fact["is_excluded"],
+        "invoice_revenue",
+    ] = 0
 
     # ============================================================
     # 11. PAID INVOICE REVENUE
@@ -255,7 +251,43 @@ def build_performance_fact(fact: pd.DataFrame) -> pd.DataFrame:
     )
 
     # ============================================================
-    # 13. PERFORMANCE SCOPE
+    # 13. INVOICE QUANTITY
+    # ============================================================
+
+    # Satu invoice = satu transaksi.
+    #
+    # Transaction Fact sudah melakukan deduplication berdasarkan:
+    # brand + invoice_no
+    #
+    # Jadi setiap row dashboard adalah satu unique invoice.
+
+    fact["qty_invoice"] = (
+        fact["invoice_no"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .ne("")
+        .astype(int)
+    )
+
+    fact["qty_invoice_paid"] = (
+        fact["qty_invoice"]
+        .where(
+            fact["is_paid"],
+            0,
+        )
+    )
+
+    fact["qty_invoice_unpaid"] = (
+        fact["qty_invoice"]
+        .where(
+            fact["is_unpaid"],
+            0,
+        )
+    )
+
+    # ============================================================
+    # 14. PERFORMANCE SCOPE
     # ============================================================
 
     fact["is_dashboard"] = (
@@ -265,7 +297,7 @@ def build_performance_fact(fact: pd.DataFrame) -> pd.DataFrame:
     )
 
     # ============================================================
-    # 14. SORT
+    # 15. SORT
     # ============================================================
 
     fact = fact.sort_values(
@@ -275,16 +307,14 @@ def build_performance_fact(fact: pd.DataFrame) -> pd.DataFrame:
             "invoice_no",
         ],
         na_position="last",
-    ).reset_index(
-        drop=True
-    )
+    ).reset_index(drop=True)
 
     return fact
 
 
-# ============================================================
+# ================================================================
 # AUDIT
-# ============================================================
+# ================================================================
 
 def print_performance_audit(
     performance: pd.DataFrame,
@@ -296,9 +326,9 @@ def print_performance_audit(
         f"{len(performance):,}"
     )
 
-    # ========================================================
+    # ============================================================
     # LIVE STATUS
-    # ========================================================
+    # ============================================================
 
     print("\n===== LIVE STATUS =====")
 
@@ -307,9 +337,9 @@ def print_performance_audit(
         .value_counts(dropna=False)
     )
 
-    # ========================================================
+    # ============================================================
     # KPI SCOPE
-    # ========================================================
+    # ============================================================
 
     print("\n===== KPI SCOPE =====")
 
@@ -318,15 +348,25 @@ def print_performance_audit(
         .value_counts(dropna=False)
     )
 
-    # ========================================================
+    # ============================================================
     # PAID
-    # ========================================================
+    # ============================================================
 
     print("\n===== PAID =====")
+
+    paid_mask = (
+        performance["is_dashboard"]
+        & performance["is_paid"]
+    )
 
     print(
         f"Transactions : "
         f"{performance['is_paid'].sum():,}"
+    )
+
+    print(
+        f"Invoice Qty  : "
+        f"{performance.loc[paid_mask, 'qty_invoice_paid'].sum():,}"
     )
 
     print(
@@ -336,18 +376,28 @@ def print_performance_audit(
 
     print(
         f"Invoice Rev  : Rp "
-        f"{performance.loc[performance['is_dashboard'] & performance['is_paid'], 'paid_invoice_revenue'].sum():,.0f}"
+        f"{performance.loc[paid_mask, 'paid_invoice_revenue'].sum():,.0f}"
     )
 
-    # ========================================================
+    # ============================================================
     # UNPAID
-    # ========================================================
+    # ============================================================
 
     print("\n===== UNPAID =====")
+
+    unpaid_mask = (
+        performance["is_dashboard"]
+        & performance["is_unpaid"]
+    )
 
     print(
         f"Transactions : "
         f"{performance['is_unpaid'].sum():,}"
+    )
+
+    print(
+        f"Invoice Qty  : "
+        f"{performance.loc[unpaid_mask, 'qty_invoice_unpaid'].sum():,}"
     )
 
     print(
@@ -357,12 +407,12 @@ def print_performance_audit(
 
     print(
         f"Invoice Rev  : Rp "
-        f"{performance.loc[performance['is_dashboard'] & performance['is_unpaid'], 'unpaid_invoice_revenue'].sum():,.0f}"
+        f"{performance.loc[unpaid_mask, 'unpaid_invoice_revenue'].sum():,.0f}"
     )
 
-    # ========================================================
+    # ============================================================
     # EXCLUDED
-    # ========================================================
+    # ============================================================
 
     print("\n===== EXCLUDED =====")
 
@@ -371,9 +421,9 @@ def print_performance_audit(
         f"{performance['is_excluded'].sum():,}"
     )
 
-    # ========================================================
+    # ============================================================
     # PERFORMANCE DATE
-    # ========================================================
+    # ============================================================
 
     print("\n===== PERFORMANCE DATE =====")
 
@@ -390,9 +440,9 @@ def print_performance_audit(
         date_audit.to_string()
     )
 
-    # ========================================================
+    # ============================================================
     # LIVE TIMESTAMP
-    # ========================================================
+    # ============================================================
 
     print("\n===== LIVE TIMESTAMP =====")
 
@@ -409,9 +459,9 @@ def print_performance_audit(
         .to_string(index=False)
     )
 
-    # ========================================================
+    # ============================================================
     # REVENUE VALIDATION
-    # ========================================================
+    # ============================================================
 
     print("\n===== REVENUE VALIDATION =====")
 
@@ -466,9 +516,56 @@ def print_performance_audit(
         f"{'OK' if total_revenue == paid_revenue + unpaid_revenue else 'CHECK'}"
     )
 
-    # ========================================================
+    # ============================================================
+    # INVOICE QUANTITY VALIDATION
+    # ============================================================
+
+    print("\n===== INVOICE QUANTITY VALIDATION =====")
+
+    paid_qty = (
+        performance.loc[
+            dashboard_mask & performance["is_paid"],
+            "qty_invoice_paid",
+        ]
+        .sum()
+    )
+
+    unpaid_qty = (
+        performance.loc[
+            dashboard_mask & performance["is_unpaid"],
+            "qty_invoice_unpaid",
+        ]
+        .sum()
+    )
+
+    dashboard_qty = (
+        dashboard_mask
+        .sum()
+    )
+
+    print(
+        f"Paid Invoice Qty   : "
+        f"{paid_qty:,}"
+    )
+
+    print(
+        f"Unpaid Invoice Qty : "
+        f"{unpaid_qty:,}"
+    )
+
+    print(
+        f"Dashboard Invoice  : "
+        f"{dashboard_qty:,}"
+    )
+
+    print(
+        "Invoice reconciliation : "
+        f"{'OK' if paid_qty + unpaid_qty == dashboard_qty else 'CHECK'}"
+    )
+
+    # ============================================================
     # FINAL VALIDATION
-    # ========================================================
+    # ============================================================
 
     print("\n===== FINAL VALIDATION =====")
 
@@ -503,17 +600,17 @@ def print_performance_audit(
     )
 
 
-# ============================================================
+# ================================================================
 # MAIN
-# ============================================================
+# ================================================================
 
 def main():
 
     print("Loading Google Sheets...")
 
-    # ========================================================
+    # ============================================================
     # LOAD RAW
-    # ========================================================
+    # ============================================================
 
     target = load_sheet(
         "TARGET AGENT"
@@ -539,9 +636,9 @@ def main():
         f"BK RAW       : {len(bk):,} rows"
     )
 
-    # ========================================================
+    # ============================================================
     # PREPARE
-    # ========================================================
+    # ============================================================
 
     target = prepare_target_agent(
         target
@@ -557,9 +654,9 @@ def main():
         "Bekelin",
     )
 
-    # ========================================================
+    # ============================================================
     # TRANSACTION FACT
-    # ========================================================
+    # ============================================================
 
     print(
         "\nBuilding transaction fact..."
@@ -583,9 +680,9 @@ def main():
         ignore_index=True,
     )
 
-    # ========================================================
+    # ============================================================
     # PERFORMANCE FACT
-    # ========================================================
+    # ============================================================
 
     print(
         "\nBuilding performance fact..."
@@ -595,9 +692,9 @@ def main():
         fact
     )
 
-    # ========================================================
+    # ============================================================
     # AUDIT
-    # ========================================================
+    # ============================================================
 
     print_performance_audit(
         performance

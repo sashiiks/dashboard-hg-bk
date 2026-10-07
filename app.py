@@ -25,7 +25,7 @@ st.set_page_config(
 # =========================================================
 
 def safe_float(value):
-    """Konversi value ke float dengan aman."""
+    """Konversi value menjadi float dengan aman."""
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -49,6 +49,7 @@ def get_latest_update(perf):
     Mengambil timestamp update source terbaru
     dari data performance.
     """
+
     if perf is None or perf.empty:
         return None
 
@@ -78,6 +79,7 @@ def get_company_period(target_company):
     Mengambil periode aktif berdasarkan target date
     yang tersedia untuk company.
     """
+
     if target_company.empty:
         return None, None
 
@@ -108,6 +110,9 @@ def get_company_summary(
     Periode:
     - start = tanggal pertama target;
     - end   = tanggal terakhir target.
+
+    KPI diambil dari build_range_performance()
+    agar logic UI konsisten dengan dashboard performance.
     """
 
     empty_summary = {
@@ -138,7 +143,7 @@ def get_company_summary(
 
     target_company = target_company[
         target_company["_company_filter"].eq(
-            str(company).casefold()
+            str(company).strip().casefold()
         )
     ].copy()
 
@@ -200,13 +205,11 @@ def get_company_summary(
 st.markdown(
     """
     <style>
-
     .block-container {
         padding-top: 2rem;
         padding-bottom: 2rem;
         max-width: 1450px;
     }
-
     </style>
     """,
     unsafe_allow_html=True,

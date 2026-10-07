@@ -2,7 +2,10 @@ import pandas as pd
 
 from functools import lru_cache
 
-from build_achievement_fact import build_performance, build_targets
+from build_achievement_fact import (
+    build_performance,
+    build_targets,
+)
 
 
 # =========================================================
@@ -77,7 +80,8 @@ def to_bool(series):
 def clean_invoice_series(series):
     """
     Bersihkan invoice_no.
-    Invoice kosong tidak dihitung.
+
+    Invoice kosong / invalid tidak dihitung.
     """
 
     invoice = (
@@ -295,8 +299,11 @@ def prepare_performance(performance):
     # =====================================================
     # DATE LOGIC
     #
-    # PAID     -> PAYMENT DATE
-    # UNPAID   -> INVOICE DATE
+    # PAID
+    #   -> PAYMENT DATE
+    #
+    # UNPAID
+    #   -> INVOICE DATE
     # =====================================================
 
     if "payment_date" in df.columns:
@@ -313,10 +320,12 @@ def prepare_performance(performance):
     else:
         df["invoice_date_clean"] = pd.NaT
 
-    df["dashboard_date"] = df[
-        "invoice_date_clean"
-    ]
+    # Default: invoice date.
+    df["dashboard_date"] = (
+        df["invoice_date_clean"]
+    )
 
+    # Paid berpindah ke payment date.
     df.loc[
         df["valid_paid"],
         "dashboard_date",
@@ -325,9 +334,9 @@ def prepare_performance(performance):
         "payment_date_clean",
     ]
 
-    df["performance_date"] = df[
-        "dashboard_date"
-    ]
+    df["performance_date"] = (
+        df["dashboard_date"]
+    )
 
     # =====================================================
     # NUMERIC
@@ -604,6 +613,8 @@ def build_dashboard_performance():
     #
     # Semua dimensi dashboard berasal
     # dari TARGET AGENT.
+    #
+    # Unmapped sales tidak masuk dashboard.
     # =====================================================
 
     performance = performance.merge(
@@ -670,9 +681,11 @@ def build_invoice_state(perf):
     Membuat satu record final untuk setiap invoice.
 
     Aturan:
-    - Cancel / excluded tidak masuk.
-    - Paid menang atas Unpaid.
-    - Invoice yang sama tidak dihitung berkali-kali.
+
+    - Cancel / excluded tidak masuk;
+    - Paid menang atas Unpaid;
+    - Invoice yang sama tidak dihitung berkali-kali;
+    - Dimensi agent mengikuti TARGET AGENT.
     """
 
     required = [
@@ -715,7 +728,10 @@ def build_invoice_state(perf):
         invoice_df["invoice_no"]
     )
 
-    # Excluded / cancel tidak masuk.
+    # =====================================================
+    # EXCLUDED / CANCEL TIDAK MASUK
+    # =====================================================
+
     invoice_df = invoice_df[
         invoice_df["invoice_no"].notna()
         & ~invoice_df["is_excluded"]
@@ -784,6 +800,16 @@ def build_invoice_state(perf):
 # =========================================================
 
 def build_invoice_quantity(perf):
+    """
+    Menghasilkan jumlah invoice unik per agent.
+
+    Output:
+
+    - Qty Invoice Paid;
+    - Qty Invoice Unpaid.
+
+    Satu invoice hanya dihitung satu kali.
+    """
 
     invoice_state = build_invoice_state(
         perf
@@ -860,6 +886,7 @@ def calculate_cvr(
     qty_paid,
     qty_unpaid,
 ):
+
     total_invoice = (
         qty_paid
         + qty_unpaid
@@ -1002,6 +1029,14 @@ def build_daily_performance(
 
     # =====================================================
     # DAILY INVOICE QTY
+    #
+    # Karena Transaction Fact sudah menjamin
+    # satu brand + invoice_no = satu transaksi,
+    # invoice quantity dapat langsung dihitung
+    # dari performance yang sudah difilter tanggal.
+    #
+    # Ini mencegah invoice berpindah tanggal akibat
+    # drop_duplicates(... keep="last").
     # =====================================================
 
     daily_invoice = pd.DataFrame(
@@ -1013,47 +1048,38 @@ def build_daily_performance(
     )
 
     if not perf.empty:
-        invoice_state = build_invoice_state(
-            perf
+
+        invoice_perf = perf.copy()
+
+        invoice_perf["invoice_no"] = (
+            clean_invoice_series(
+                invoice_perf["invoice_no"]
+            )
         )
 
-        if not invoice_state.empty:
-            # Ambil tanggal dari transaksi
-            # sesuai dashboard_date/performance_date.
-            invoice_dates = (
-                perf[
-                    [
-                        "company",
-                        "agent_key",
-                        "invoice_no",
-                        "performance_date",
-                    ]
-                ]
-                .dropna(
-                    subset=["invoice_no"]
-                )
+        invoice_perf = invoice_perf[
+            invoice_perf["invoice_no"].notna()
+            & ~invoice_perf["is_excluded"]
+        ].copy()
+
+        if not invoice_perf.empty:
+
+            # Satu invoice per Transaction Fact.
+            # Tetap drop_duplicates sebagai safety layer.
+            invoice_perf = (
+                invoice_perf
                 .drop_duplicates(
                     subset=[
                         "company",
                         "agent_key",
                         "invoice_no",
                     ],
-                    keep="last",
+                    keep="first",
                 )
             )
 
-            invoice_state = invoice_state.merge(
-                invoice_dates,
-                on=[
-                    "company",
-                    "agent_key",
-                    "invoice_no",
-                ],
-                how="left",
-            )
-
             daily_invoice = (
-                invoice_state
+                invoice_perf
                 .groupby(
                     "performance_date",
                     as_index=False,
@@ -1072,7 +1098,7 @@ def build_daily_performance(
                 )
                 .rename(
                     columns={
-                        "performance_date": "date"
+                        "performance_date": "date",
                     }
                 )
             )
@@ -1104,6 +1130,10 @@ def build_daily_performance(
         "date"
     )
 
+    # =====================================================
+    # NUMERIC
+    # =====================================================
+
     numeric_columns = [
         "target",
         "paid",
@@ -1115,6 +1145,7 @@ def build_daily_performance(
     ]
 
     for col in numeric_columns:
+
         if col not in result.columns:
             result[col] = 0
 
@@ -1159,18 +1190,17 @@ def build_daily_performance(
     # ACHIEVEMENT CVR
     # =====================================================
 
+    total_invoice = (
+        result["Qty Invoice Paid"]
+        + result["Qty Invoice Unpaid"]
+    )
+
     result["achievement_cvr"] = (
         result["Qty Invoice Paid"]
-        / (
-            result["Qty Invoice Paid"]
-            + result["Qty Invoice Unpaid"]
-        )
+        / total_invoice
         * 100
     ).where(
-        (
-            result["Qty Invoice Paid"]
-            + result["Qty Invoice Unpaid"]
-        ) > 0,
+        total_invoice > 0,
         0,
     )
 
@@ -1283,6 +1313,17 @@ def build_range_performance(
 
     # =====================================================
     # INVOICE QTY
+    #
+    # perf sudah difilter berdasarkan:
+    # - company;
+    # - date range;
+    # - team leader;
+    # - agent;
+    # - role;
+    # - tier.
+    #
+    # Jadi quantity hanya berasal dari scope
+    # dashboard yang sedang dipilih.
     # =====================================================
 
     invoice_qty = build_invoice_quantity(
@@ -1290,13 +1331,17 @@ def build_range_performance(
     )
 
     qty_paid = (
-        invoice_qty["Qty Invoice Paid"].sum()
+        invoice_qty[
+            "Qty Invoice Paid"
+        ].sum()
         if not invoice_qty.empty
         else 0
     )
 
     qty_unpaid = (
-        invoice_qty["Qty Invoice Unpaid"].sum()
+        invoice_qty[
+            "Qty Invoice Unpaid"
+        ].sum()
         if not invoice_qty.empty
         else 0
     )
@@ -1534,7 +1579,18 @@ def build_agent_ranking(
     if not invoice_qty.empty:
 
         result = result.merge(
-            invoice_qty,
+            invoice_qty[
+                [
+                    "company",
+                    "agent_key",
+                    "agent",
+                    "role",
+                    "team_leader",
+                    "tier",
+                    "Qty Invoice Paid",
+                    "Qty Invoice Unpaid",
+                ]
+            ],
             on=[
                 "company",
                 "agent_key",
@@ -1596,18 +1652,17 @@ def build_agent_ranking(
     # ACHIEVEMENT CVR
     # =====================================================
 
+    total_invoice = (
+        result["Qty Invoice Paid"]
+        + result["Qty Invoice Unpaid"]
+    )
+
     result["achievement_cvr"] = (
         result["Qty Invoice Paid"]
-        / (
-            result["Qty Invoice Paid"]
-            + result["Qty Invoice Unpaid"]
-        )
+        / total_invoice
         * 100
     ).where(
-        (
-            result["Qty Invoice Paid"]
-            + result["Qty Invoice Unpaid"]
-        ) > 0,
+        total_invoice > 0,
         0,
     )
 
@@ -1857,6 +1912,7 @@ def build_mtd_agent(
         target
         .groupby(
             [
+                "company",
                 "agent_key",
                 "agent",
                 "role",
@@ -1882,6 +1938,7 @@ def build_mtd_agent(
         perf
         .groupby(
             [
+                "company",
                 "agent_key",
                 "agent",
                 "role",
@@ -1908,6 +1965,7 @@ def build_mtd_agent(
     result = target_agent.merge(
         perf_agent,
         on=[
+            "company",
             "agent_key",
             "agent",
             "role",
@@ -1942,6 +2000,10 @@ def build_mtd_agent(
 
     # =====================================================
     # INVOICE QTY
+    #
+    # perf sudah difilter MTD terlebih dahulu.
+    # Jadi quantity hanya invoice yang masuk
+    # ke periode MTD.
     # =====================================================
 
     invoice_qty = build_invoice_quantity(
@@ -1953,12 +2015,24 @@ def build_mtd_agent(
         result = result.merge(
             invoice_qty[
                 [
+                    "company",
                     "agent_key",
+                    "agent",
+                    "role",
+                    "team_leader",
+                    "tier",
                     "Qty Invoice Paid",
                     "Qty Invoice Unpaid",
                 ]
             ],
-            on="agent_key",
+            on=[
+                "company",
+                "agent_key",
+                "agent",
+                "role",
+                "team_leader",
+                "tier",
+            ],
             how="left",
         )
 
@@ -1966,6 +2040,10 @@ def build_mtd_agent(
 
         result["Qty Invoice Paid"] = 0
         result["Qty Invoice Unpaid"] = 0
+
+    # =====================================================
+    # CLEAN QTY
+    # =====================================================
 
     result["Qty Invoice Paid"] = (
         pd.to_numeric(
@@ -2008,18 +2086,17 @@ def build_mtd_agent(
     # ACHIEVEMENT CVR
     # =====================================================
 
+    total_invoice = (
+        result["Qty Invoice Paid"]
+        + result["Qty Invoice Unpaid"]
+    )
+
     result["achievement_cvr"] = (
         result["Qty Invoice Paid"]
-        / (
-            result["Qty Invoice Paid"]
-            + result["Qty Invoice Unpaid"]
-        )
+        / total_invoice
         * 100
     ).where(
-        (
-            result["Qty Invoice Paid"]
-            + result["Qty Invoice Unpaid"]
-        ) > 0,
+        total_invoice > 0,
         0,
     )
 

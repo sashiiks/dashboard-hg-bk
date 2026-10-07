@@ -1501,61 +1501,51 @@ def render_agent_ranking_table(df):
         display["Target"] = 0
 
     # --------------------------------------------------------
-    # NUMERIC
+    # INVOICE QUANTITY
     # --------------------------------------------------------
 
-    numeric_columns = [
-        "Qty Invoice Paid",
-        "Qty Invoice Unpaid",
-        "paid_invoice_revenue",
-        "unpaid_invoice_revenue",
-        "achievement_pct",
-        "projection_pct",
-    ]
+    if "Qty Invoice Paid" not in display.columns:
+        display["Qty Invoice Paid"] = 0
 
-    for col in numeric_columns:
-        if col in display.columns:
-            display[col] = pd.to_numeric(
-                display[col],
-                errors="coerce",
-            ).fillna(0)
+    if "Qty Invoice Unpaid" not in display.columns:
+        display["Qty Invoice Unpaid"] = 0
 
-    # --------------------------------------------------------
-    # RENAME REVENUE
-    # --------------------------------------------------------
+    display["Qty Invoice Paid"] = (
+        pd.to_numeric(
+            display["Qty Invoice Paid"],
+            errors="coerce",
+        )
+        .fillna(0)
+        .astype(int)
+    )
 
-    if "paid_invoice_revenue" in display.columns:
-        display["Paid Invoice Revenue"] = display[
-            "paid_invoice_revenue"
-        ]
-
-    else:
-        display["Paid Invoice Revenue"] = 0
-
-    if "unpaid_invoice_revenue" in display.columns:
-        display["Unpaid Invoice Revenue"] = display[
-            "unpaid_invoice_revenue"
-        ]
-
-    else:
-        display["Unpaid Invoice Revenue"] = 0
+    display["Qty Invoice Unpaid"] = (
+        pd.to_numeric(
+            display["Qty Invoice Unpaid"],
+            errors="coerce",
+        )
+        .fillna(0)
+        .astype(int)
+    )
 
     # --------------------------------------------------------
     # ACHIEVEMENT / PROJECTION
     # --------------------------------------------------------
 
     if "achievement_pct" in display.columns:
-        display["Achievement"] = display[
-            "achievement_pct"
-        ]
+        display["Achievement"] = pd.to_numeric(
+            display["achievement_pct"],
+            errors="coerce",
+        ).fillna(0)
 
     else:
         display["Achievement"] = 0
 
     if "projection_pct" in display.columns:
-        display["Projection"] = display[
-            "projection_pct"
-        ]
+        display["Projection"] = pd.to_numeric(
+            display["projection_pct"],
+            errors="coerce",
+        ).fillna(0)
 
     else:
         display["Projection"] = 0
@@ -1585,8 +1575,6 @@ def render_agent_ranking_table(df):
         "Target",
         "Qty Invoice Paid",
         "Qty Invoice Unpaid",
-        "Paid Invoice Revenue",
-        "Unpaid Invoice Revenue",
         "Achievement",
         "Projection",
         "Achievement CVR",
@@ -1619,14 +1607,6 @@ def render_agent_ranking_table(df):
         .fillna(0)
         .astype(int)
     )
-
-    display["Paid Invoice Revenue"] = display[
-        "Paid Invoice Revenue"
-    ].map(rupiah)
-
-    display["Unpaid Invoice Revenue"] = display[
-        "Unpaid Invoice Revenue"
-    ].map(rupiah)
 
     # --------------------------------------------------------
     # SAVE NUMERIC ACHIEVEMENT
