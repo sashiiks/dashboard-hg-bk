@@ -120,12 +120,10 @@ def build_performance_fact(fact: pd.DataFrame) -> pd.DataFrame:
 
     # Default:
     # success -> payment_date
-
     fact["performance_datetime"] = fact["payment_date"]
 
     # Unpaid:
     # pending/challenge -> tanggal
-
     unpaid_mask = fact["status_live"].eq("Unpaid")
 
     fact.loc[
@@ -138,7 +136,6 @@ def build_performance_fact(fact: pd.DataFrame) -> pd.DataFrame:
 
     # Excluded:
     # cancel tidak masuk performance
-
     excluded_mask = fact["status_live"].eq("Excluded")
 
     fact.loc[
@@ -155,7 +152,11 @@ def build_performance_fact(fact: pd.DataFrame) -> pd.DataFrame:
     # 6. LIVE UPDATE TIMESTAMP
     # ============================================================
 
-    source_updated_at = pd.Timestamp.now()
+    # Gunakan timezone Asia/Jakarta agar waktu di local
+    # dan Streamlit Cloud sama-sama menggunakan WIB.
+    source_updated_at = pd.Timestamp.now(
+        tz="Asia/Jakarta"
+    )
 
     fact["source_updated_at"] = source_updated_at
 
@@ -206,7 +207,6 @@ def build_performance_fact(fact: pd.DataFrame) -> pd.DataFrame:
     )
 
     # Cancel tidak masuk KPI.
-
     fact.loc[
         fact["is_excluded"],
         "performance_amount",
@@ -222,7 +222,6 @@ def build_performance_fact(fact: pd.DataFrame) -> pd.DataFrame:
     ).fillna(0)
 
     # Cancel tidak mempunyai revenue dashboard.
-
     fact.loc[
         fact["is_excluded"],
         "invoice_revenue",
