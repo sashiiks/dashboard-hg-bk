@@ -8,6 +8,7 @@
 # ============================================================
 
 import inspect
+import time
 from datetime import timedelta
 
 import pandas as pd
@@ -217,7 +218,42 @@ def load_data():
 
 
 # ============================================================
-# 7. GENERIC BUILDER CALLER
+# 7. AUTO REFRESH
+# ============================================================
+
+@st.fragment(run_every="5m")
+def auto_refresh_dashboard():
+    """
+    Auto refresh dashboard setiap 5 menit.
+
+    Fragment hanya digunakan sebagai timer.
+    Seluruh dashboard tetap melakukan full rerun
+    agar data Google Sheets dan cache benar-benar diperbarui.
+    """
+
+    now = time.time()
+
+    if "bk_last_auto_refresh" not in st.session_state:
+        st.session_state.bk_last_auto_refresh = now
+        return
+
+    if (
+        now - st.session_state.bk_last_auto_refresh
+        >= 300
+    ):
+        st.session_state.bk_last_auto_refresh = now
+
+        clear_dashboard_cache()
+        st.cache_data.clear()
+
+        st.rerun()
+
+
+auto_refresh_dashboard()
+
+
+# ============================================================
+# 8. GENERIC BUILDER CALLER
 # ============================================================
 
 def call_dashboard_builder(
@@ -275,7 +311,7 @@ def call_dashboard_builder(
 
 
 # ============================================================
-# 8. FILTER PERFORMANCE
+# 9. FILTER PERFORMANCE
 # ============================================================
 
 def filter_performance(
@@ -407,7 +443,7 @@ def filter_performance(
 
 
 # ============================================================
-# 9. FILTER TARGET
+# 10. FILTER TARGET
 # ============================================================
 
 def filter_target(
@@ -530,7 +566,7 @@ def filter_target(
 
 
 # ============================================================
-# 10. CALCULATE UNIQUE INVOICE QUANTITY
+# 11. CALCULATE UNIQUE INVOICE QUANTITY
 # ============================================================
 
 def calculate_invoice_quantity(perf):
@@ -688,7 +724,7 @@ def calculate_invoice_quantity(perf):
 
 
 # ============================================================
-# 11. MERGE QTY KE AGENT RANKING
+# 12. MERGE QTY KE AGENT RANKING
 # ============================================================
 
 def merge_invoice_quantity(ranking, perf):
@@ -763,7 +799,7 @@ def merge_invoice_quantity(ranking, perf):
 
 
 # ============================================================
-# 12. CALCULATE AGENT MTD
+# 13. CALCULATE AGENT MTD
 # ============================================================
 
 def calculate_agent_mtd(
@@ -991,7 +1027,7 @@ def calculate_agent_mtd(
 
 
 # ============================================================
-# 13. CALCULATE TEAM LEADER MTD
+# 14. CALCULATE TEAM LEADER MTD
 # ============================================================
 
 def calculate_team_leader_mtd(
@@ -1256,7 +1292,7 @@ def calculate_team_leader_mtd(
 
 
 # ============================================================
-# 14. CALCULATE PERIOD ACHIEVEMENT
+# 15. CALCULATE PERIOD ACHIEVEMENT
 # ============================================================
 
 def calculate_period_achievement(
@@ -1356,7 +1392,7 @@ def calculate_period_achievement(
 
 
 # ============================================================
-# 15. KPI SECTION
+# 16. KPI SECTION
 # ============================================================
 
 def show_kpi_cards(
@@ -1437,7 +1473,7 @@ def show_kpi_cards(
 
 
 # ============================================================
-# 16. AGENT RANKING TABLE
+# 17. AGENT RANKING TABLE
 # ============================================================
 
 def render_agent_ranking_table(df):
@@ -1673,7 +1709,7 @@ def render_agent_ranking_table(df):
 
 
 # ============================================================
-# 17. MTD TEAM LEADER
+# 18. MTD TEAM LEADER
 # ============================================================
 
 def render_team_leader_cards(
@@ -1876,7 +1912,7 @@ def render_team_leader_cards(
 
 
 # ============================================================
-# 18. MTD AGENT TABLE
+# 19. MTD AGENT TABLE
 # ============================================================
 
 def render_mtd_agent_table(df):
@@ -2015,7 +2051,7 @@ def render_mtd_agent_table(df):
 
 
 # ============================================================
-# 19. HEADER
+# 20. HEADER
 # ============================================================
 
 header_col1, header_col2 = st.columns(
@@ -2045,7 +2081,7 @@ with header_col2:
 
 
 # ============================================================
-# 20. LOAD DATA
+# 21. LOAD DATA
 # ============================================================
 
 try:
@@ -2059,7 +2095,7 @@ except Exception as exc:
 
 
 # ============================================================
-# 21. BASIC DATA VALIDATION
+# 22. BASIC DATA VALIDATION
 # ============================================================
 
 if perf is None or not isinstance(
@@ -2089,7 +2125,7 @@ if "company" not in perf.columns:
 
 
 # ============================================================
-# 22. NORMALISASI DATA
+# 23. NORMALISASI DATA
 # ============================================================
 
 if "performance_date" in perf.columns:
@@ -2112,14 +2148,14 @@ if "daily_target" not in target.columns:
 
 
 # ============================================================
-# 23. COMPANY
+# 24. COMPANY
 # ============================================================
 
 company = "BK"
 
 
 # ============================================================
-# 24. FILTER
+# 25. FILTER
 # ============================================================
 
 st.subheader(
@@ -2133,7 +2169,7 @@ st.caption(
 
 
 # ============================================================
-# 25. REFRESH / RESET
+# 26. REFRESH / RESET
 # ============================================================
 
 action_col1, action_col2, action_col3 = st.columns(
@@ -2178,7 +2214,7 @@ if reset_clicked:
 
 
 # ============================================================
-# 26. AVAILABLE DATES
+# 27. AVAILABLE DATES
 # ============================================================
 
 available_dates = sorted(
@@ -2202,7 +2238,7 @@ latest_date = max(
 
 
 # ============================================================
-# 27. FILTER PERIODE
+# 28. FILTER PERIODE
 # ============================================================
 
 filter_col1, filter_col2 = st.columns(
@@ -2269,7 +2305,7 @@ with filter_col2:
 
 
 # ============================================================
-# 28. FILTER DIMENSIONS
+# 29. FILTER DIMENSIONS
 # ============================================================
 
 def get_filter_values(df, column):
@@ -2353,7 +2389,7 @@ st.divider()
 
 
 # ============================================================
-# 29. CURRENT FILTER VALUES
+# 30. CURRENT FILTER VALUES
 # ============================================================
 
 filter_agent = first_or_none(
@@ -2374,7 +2410,7 @@ filter_tier = first_or_none(
 
 
 # ============================================================
-# 30. DAILY RANGE PERFORMANCE
+# 31. DAILY RANGE PERFORMANCE
 # ============================================================
 
 st.subheader(
@@ -2444,7 +2480,7 @@ projection_value = safe_float(
 
 
 # ============================================================
-# 31. SOURCE UPDATE
+# 32. SOURCE UPDATE
 # ============================================================
 
 filtered_for_update = filter_performance(
@@ -2509,7 +2545,7 @@ if not filtered_for_update.empty:
 
 
 # ============================================================
-# 32. KPI
+# 33. KPI
 # ============================================================
 
 show_kpi_cards(
@@ -2522,7 +2558,7 @@ show_kpi_cards(
 
 
 # ============================================================
-# 33. DAILY PERFORMANCE
+# 34. DAILY PERFORMANCE
 # ============================================================
 
 st.subheader(
@@ -2670,7 +2706,7 @@ else:
 
 
 # ============================================================
-# 34. AGENT RANKING
+# 35. AGENT RANKING
 # ============================================================
 
 st.subheader(
@@ -2797,7 +2833,7 @@ else:
 
 
 # ============================================================
-# 35. MTD PERFORMANCE — TEAM LEADER
+# 36. MTD PERFORMANCE — TEAM LEADER
 # ============================================================
 
 st.subheader(
@@ -2830,7 +2866,7 @@ except Exception as exc:
 
 
 # ============================================================
-# 36. PERIOD ACHIEVEMENT
+# 37. PERIOD ACHIEVEMENT
 # ============================================================
 
 try:
@@ -2859,7 +2895,7 @@ render_team_leader_cards(
 
 
 # ============================================================
-# 37. MTD PERFORMANCE — AGENT
+# 38. MTD PERFORMANCE — AGENT
 # ============================================================
 
 st.subheader(
@@ -2910,7 +2946,7 @@ else:
 
 
 # ============================================================
-# 38. LIVE DATA STATUS
+# 39. LIVE DATA STATUS
 # ============================================================
 
 st.subheader(
@@ -2929,7 +2965,7 @@ else:
 
 
 # ============================================================
-# 39. FOOTER NAVIGATION
+# 40. FOOTER NAVIGATION
 # ============================================================
 
 st.divider()

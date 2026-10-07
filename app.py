@@ -49,7 +49,6 @@ def get_latest_update(perf):
     Mengambil timestamp update source terbaru
     dari data performance.
     """
-
     if perf is None or perf.empty:
         return None
 
@@ -79,7 +78,6 @@ def get_company_period(target_company):
     Mengambil periode aktif berdasarkan target date
     yang tersedia untuk company.
     """
-
     if target_company.empty:
         return None, None
 
@@ -114,7 +112,6 @@ def get_company_summary(
     KPI diambil dari build_range_performance()
     agar logic UI konsisten dengan dashboard performance.
     """
-
     empty_summary = {
         "target": 0,
         "paid": 0,
@@ -225,316 +222,326 @@ if "refresh_key" not in st.session_state:
 
 
 # =========================================================
-# 5. LOAD DATA
+# 5. MAIN DASHBOARD
 # =========================================================
 
-try:
-    with st.spinner("Mengambil data dashboard..."):
-        perf, target = build_dashboard_performance()
+@st.fragment(run_every="5m")
+def render_dashboard():
 
-except Exception as e:
-    st.error(
-        f"Gagal mengambil data dashboard: {e}"
-    )
-    st.stop()
+    # -----------------------------------------------------
+    # 5.1 LOAD DATA
+    # -----------------------------------------------------
 
+    try:
+        with st.spinner("Mengambil data dashboard..."):
 
-# =========================================================
-# 6. BASIC DATA SAFETY
-# =========================================================
-
-if perf is None or perf.empty:
-    st.warning(
-        "Data performance belum tersedia."
-    )
-    st.stop()
-
-
-if target is None or target.empty:
-    st.warning(
-        "Data target belum tersedia."
-    )
-    st.stop()
-
-
-# =========================================================
-# 7. HEADER
-# =========================================================
-
-st.title(
-    "Executive Performance Dashboard"
-)
-
-st.write(
-    "Ringkasan performa Healthy Go dan Bekelin "
-    "berdasarkan data terbaru dari Google Sheets."
-)
-
-
-# =========================================================
-# 8. LIVE SOURCE STATUS
-# =========================================================
-
-latest_update = get_latest_update(perf)
-
-if latest_update is not None:
-    st.success(
-        "🟢 LIVE · Last source update: "
-        f"{latest_update.strftime('%d %b %Y, %H:%M:%S')}"
-    )
-else:
-    st.info(
-        "🟢 LIVE · Source update time unavailable"
-    )
-
-
-# =========================================================
-# 9. REFRESH DATA
-# =========================================================
-
-refresh_col, spacer_col = st.columns(
-    [1.2, 5]
-)
-
-with refresh_col:
-    if st.button(
-        "🔄 Refresh Data",
-        use_container_width=True,
-    ):
-        with st.spinner(
-            "Mengambil data terbaru dari Google Sheets..."
-        ):
+            # Clear cache setiap auto-refresh agar
+            # dashboard mengambil data terbaru dari source.
             clear_dashboard_cache()
-            st.session_state.refresh_key += 1
 
-        st.rerun()
+            perf, target = build_dashboard_performance()
 
+    except Exception as e:
+        st.error(
+            f"Gagal mengambil data dashboard: {e}"
+        )
+        return
 
-st.divider()
+    # -----------------------------------------------------
+    # 5.2 BASIC DATA SAFETY
+    # -----------------------------------------------------
 
+    if perf is None or perf.empty:
+        st.warning(
+            "Data performance belum tersedia."
+        )
+        return
 
-# =========================================================
-# 10. COMPANY PERFORMANCE
-# =========================================================
+    if target is None or target.empty:
+        st.warning(
+            "Data target belum tersedia."
+        )
+        return
 
-st.subheader(
-    "Company Performance"
-)
+    # -----------------------------------------------------
+    # 5.3 HEADER
+    # -----------------------------------------------------
 
-st.caption(
-    "Executive KPI berdasarkan data performance terbaru."
-)
-
-
-# =========================================================
-# 11. COMPANY CARD RENDERER
-# =========================================================
-
-def render_company_card(
-    company,
-    company_name,
-    icon,
-):
-    """
-    Render executive KPI untuk satu company
-    menggunakan native Streamlit.
-    """
-
-    summary = get_company_summary(
-        perf=perf,
-        target=target,
-        company=company,
+    st.title(
+        "Executive Performance Dashboard"
     )
 
-    start_date = summary.get(
-        "start_date"
-    )
-
-    end_date = summary.get(
-        "end_date"
-    )
-
-    target_value = safe_float(
-        summary.get("target", 0)
-    )
-
-    paid = safe_float(
-        summary.get("paid", 0)
-    )
-
-    unpaid = safe_float(
-        summary.get("unpaid", 0)
-    )
-
-    achievement = safe_float(
-        summary.get("achievement_pct", 0)
-    )
-
-    projection = safe_float(
-        summary.get("projection_pct", 0)
+    st.write(
+        "Ringkasan performa Healthy Go dan Bekelin "
+        "berdasarkan data terbaru dari Google Sheets."
     )
 
     # -----------------------------------------------------
-    # PERIOD
+    # 5.4 LIVE SOURCE STATUS
     # -----------------------------------------------------
 
-    if (
-        start_date is not None
-        and end_date is not None
-    ):
-        if start_date == end_date:
-            period_text = start_date.strftime(
-                "%d %b %Y"
-            )
-        else:
-            period_text = (
-                f"{start_date.strftime('%d %b %Y')}"
-                f" – "
-                f"{end_date.strftime('%d %b %Y')}"
-            )
+    latest_update = get_latest_update(perf)
+
+    if latest_update is not None:
+        st.success(
+            "🟢 LIVE · Last source update: "
+            f"{latest_update.strftime('%d %b %Y, %H:%M:%S')}"
+        )
     else:
-        period_text = "Periode tidak tersedia"
-
-    # -----------------------------------------------------
-    # COMPANY CONTAINER
-    # -----------------------------------------------------
-
-    with st.container(border=True):
-
-        # -------------------------------------------------
-        # COMPANY HEADER
-        # -------------------------------------------------
-
-        header_left, header_right = st.columns(
-            [5, 1]
+        st.info(
+            "🟢 LIVE · Source update time unavailable"
         )
 
-        with header_left:
-            st.subheader(
-                f"{icon} {company_name}"
+    # -----------------------------------------------------
+    # 5.5 REFRESH DATA
+    # -----------------------------------------------------
+
+    refresh_col, spacer_col = st.columns(
+        [1.2, 5]
+    )
+
+    with refresh_col:
+
+        if st.button(
+            "🔄 Refresh Data",
+            use_container_width=True,
+        ):
+
+            with st.spinner(
+                "Mengambil data terbaru dari Google Sheets..."
+            ):
+                clear_dashboard_cache()
+                st.session_state.refresh_key += 1
+
+            st.rerun()
+
+    st.divider()
+
+    # =====================================================
+    # 6. COMPANY PERFORMANCE
+    # =====================================================
+
+    st.subheader(
+        "Company Performance"
+    )
+
+    st.caption(
+        "Executive KPI berdasarkan data performance terbaru."
+    )
+
+    # =====================================================
+    # 7. COMPANY CARD RENDERER
+    # =====================================================
+
+    def render_company_card(
+        company,
+        company_name,
+        icon,
+    ):
+        """
+        Render executive KPI untuk satu company
+        menggunakan native Streamlit.
+        """
+
+        summary = get_company_summary(
+            perf=perf,
+            target=target,
+            company=company,
+        )
+
+        start_date = summary.get(
+            "start_date"
+        )
+
+        end_date = summary.get(
+            "end_date"
+        )
+
+        target_value = safe_float(
+            summary.get("target", 0)
+        )
+
+        paid = safe_float(
+            summary.get("paid", 0)
+        )
+
+        unpaid = safe_float(
+            summary.get("unpaid", 0)
+        )
+
+        achievement = safe_float(
+            summary.get("achievement_pct", 0)
+        )
+
+        projection = safe_float(
+            summary.get("projection_pct", 0)
+        )
+
+        # -------------------------------------------------
+        # PERIOD
+        # -------------------------------------------------
+
+        if (
+            start_date is not None
+            and end_date is not None
+        ):
+            if start_date == end_date:
+                period_text = start_date.strftime(
+                    "%d %b %Y"
+                )
+            else:
+                period_text = (
+                    f"{start_date.strftime('%d %b %Y')}"
+                    f" – "
+                    f"{end_date.strftime('%d %b %Y')}"
+                )
+        else:
+            period_text = "Periode tidak tersedia"
+
+        # -------------------------------------------------
+        # COMPANY CONTAINER
+        # -------------------------------------------------
+
+        with st.container(border=True):
+
+            # ---------------------------------------------
+            # COMPANY HEADER
+            # ---------------------------------------------
+
+            header_left, header_right = st.columns(
+                [5, 1]
             )
+
+            with header_left:
+                st.subheader(
+                    f"{icon} {company_name}"
+                )
+
+                st.caption(
+                    f"Performance period · {period_text}"
+                )
+
+            with header_right:
+                st.success(
+                    "🟢 LIVE"
+                )
+
+            # ---------------------------------------------
+            # KPI ROW
+            # ---------------------------------------------
+
+            kpi_1, kpi_2, kpi_3, kpi_4 = st.columns(4)
+
+            with kpi_1:
+                st.metric(
+                    label="PAID",
+                    value=format_rupiah(paid),
+                )
+
+            with kpi_2:
+                st.metric(
+                    label="UNPAID",
+                    value=format_rupiah(unpaid),
+                )
+
+            with kpi_3:
+                st.metric(
+                    label="ACHIEVEMENT",
+                    value=format_pct(achievement),
+                )
+
+            with kpi_4:
+                st.metric(
+                    label="PROJECTION",
+                    value=format_pct(projection),
+                )
+
+            # ---------------------------------------------
+            # TARGET
+            # ---------------------------------------------
 
             st.caption(
-                f"Performance period · {period_text}"
+                f"Target periode: {format_rupiah(target_value)}"
             )
 
-        with header_right:
-            st.success(
-                "🟢 LIVE"
+            # ---------------------------------------------
+            # ACHIEVEMENT PROGRESS
+            # ---------------------------------------------
+
+            progress_value = min(
+                max(achievement / 100, 0),
+                1,
             )
 
-        # -------------------------------------------------
-        # KPI ROW
-        # -------------------------------------------------
-
-        kpi_1, kpi_2, kpi_3, kpi_4 = st.columns(4)
-
-        with kpi_1:
-            st.metric(
-                label="PAID",
-                value=format_rupiah(paid),
-            )
-
-        with kpi_2:
-            st.metric(
-                label="UNPAID",
-                value=format_rupiah(unpaid),
-            )
-
-        with kpi_3:
-            st.metric(
-                label="ACHIEVEMENT",
-                value=format_pct(achievement),
-            )
-
-        with kpi_4:
-            st.metric(
-                label="PROJECTION",
-                value=format_pct(projection),
+            st.progress(
+                progress_value,
+                text=(
+                    f"Achievement Progress · "
+                    f"{format_pct(achievement)}"
+                ),
             )
 
         # -------------------------------------------------
-        # TARGET
+        # NAVIGATION
         # -------------------------------------------------
 
+        if company == "HG":
+            page_path = "pages/healthy_go.py"
+            button_label = "Open Healthy Go Dashboard"
+        else:
+            page_path = "pages/bekelin.py"
+            button_label = "Open Bekelin Dashboard"
+
+        st.page_link(
+            page_path,
+            label=button_label,
+            icon="📊",
+            use_container_width=True,
+        )
+
+        st.write("")
+
+    # =====================================================
+    # 8. HEALTHY GO
+    # =====================================================
+
+    render_company_card(
+        company="HG",
+        company_name="Healthy Go",
+        icon="🥗",
+    )
+
+    # =====================================================
+    # 9. BEKELIN
+    # =====================================================
+
+    render_company_card(
+        company="BK",
+        company_name="Bekelin",
+        icon="🛒",
+    )
+
+    # =====================================================
+    # 10. LAST UPDATE
+    # =====================================================
+
+    st.divider()
+
+    if latest_update is not None:
         st.caption(
-            f"Target periode: {format_rupiah(target_value)}"
+            "Sales Performance Dashboard · "
+            "🟢 LIVE · "
+            f"Last update "
+            f"{latest_update.strftime('%d %b %Y, %H:%M:%S')}"
         )
-
-        # -------------------------------------------------
-        # ACHIEVEMENT PROGRESS
-        # -------------------------------------------------
-
-        progress_value = min(
-            max(achievement / 100, 0),
-            1,
-        )
-
-        st.progress(
-            progress_value,
-            text=(
-                f"Achievement Progress · "
-                f"{format_pct(achievement)}"
-            ),
-        )
-
-    # -----------------------------------------------------
-    # NAVIGATION
-    # -----------------------------------------------------
-
-    if company == "HG":
-        page_path = "pages/healthy_go.py"
-        button_label = "Open Healthy Go Dashboard"
     else:
-        page_path = "pages/bekelin.py"
-        button_label = "Open Bekelin Dashboard"
-
-    st.page_link(
-        page_path,
-        label=button_label,
-        icon="📊",
-        use_container_width=True,
-    )
-
-    st.write("")
+        st.caption(
+            "Sales Performance Dashboard · 🟢 LIVE"
+        )
 
 
 # =========================================================
-# 12. HEALTHY GO
+# 11. RUN DASHBOARD
 # =========================================================
 
-render_company_card(
-    company="HG",
-    company_name="Healthy Go",
-    icon="🥗",
-)
-
-
-# =========================================================
-# 13. BEKELIN
-# =========================================================
-
-render_company_card(
-    company="BK",
-    company_name="Bekelin",
-    icon="🛒",
-)
-
-
-# =========================================================
-# 14. LAST UPDATE
-# =========================================================
-
-st.divider()
-
-if latest_update is not None:
-    st.caption(
-        "Sales Performance Dashboard · "
-        "🟢 LIVE · "
-        f"Last update "
-        f"{latest_update.strftime('%d %b %Y, %H:%M:%S')}"
-    )
-else:
-    st.caption(
-        "Sales Performance Dashboard · 🟢 LIVE"
-    )
+render_dashboard()
